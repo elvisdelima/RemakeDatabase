@@ -6,5 +6,5 @@ Utilitário para deletar a recriar o banco de dados
 
 
 ```
-RemakeDatabase.exe NOMEDOBANCODEDADOS
+RemakeDatabase.exe DATABASE [LOGIN] [PASSWORD]
 ```
