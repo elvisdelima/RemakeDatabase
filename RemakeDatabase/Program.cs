@@ -71,8 +71,6 @@ namespace RemakeDatabase
                     {
                         ReportErrorAndCloseConnection(e, connection);
                     }
-
-                    throw;
                 }
                 catch (Exception e)
                 {
@@ -92,10 +90,7 @@ namespace RemakeDatabase
                                             "Conexões removidas");
                 }
                 catch (Exception e)
-                {
-                    ReportErrorAndCloseConnection(e, connection);
-                    throw;
-                }
+                { }
             }
         }
 
