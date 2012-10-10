@@ -70,9 +70,8 @@ namespace RemakeDatabase
                     else
                     {
                         ReportErrorAndCloseConnection(e, connection);
+                        throw;
                     }
-
-                    throw;
                 }
                 catch (Exception e)
                 {
