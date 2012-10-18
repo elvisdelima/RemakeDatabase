@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data.SqlClient;
+using System.Linq;
 
 namespace RemakeDatabase
 {
@@ -7,6 +8,11 @@ namespace RemakeDatabase
     {
         static void Main(string[] args)
         {
+            if (args == null || !args.Any())
+            {
+                Console.WriteLine("Digite o nome da base de dados:");
+                args = new[] { Console.ReadLine() };
+            }
             var connectionStringResolver = new ConnectionResolver(args);
             var dbName = connectionStringResolver.ResolveDatabase();
 
