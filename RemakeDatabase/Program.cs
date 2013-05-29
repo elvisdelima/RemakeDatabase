@@ -8,12 +8,14 @@ namespace RemakeDatabase
     {
         static void Main(string[] args)
         {
+            //server=.\sqlexpress database=nash user=123 password=123
             if (args == null || !args.Any())
             {
                 Console.WriteLine("Digite o nome da base de dados:");
-                args = new[] { Console.ReadLine() };
+                args = new[] { string.Format("database={0}", Console.ReadLine()) };
             }
-            var connectionStringResolver = new ConnectionResolver(args);
+            var parameters = args.ToDictionary(x => x.Split('=')[0], x => x.Split('=')[1]);
+            var connectionStringResolver = new ConnectionResolver(parameters);
             var dbName = connectionStringResolver.ResolveDatabase();
 
             var sqlCloseConnections = string.Format(@"ALTER DATABASE {0} SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName);

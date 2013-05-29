@@ -1,4 +1,5 @@
-﻿using NUnit.Framework;
+﻿using System.Collections.Generic;
+using NUnit.Framework;
 
 namespace RemakeDatabase.Test
 {
@@ -8,7 +9,7 @@ namespace RemakeDatabase.Test
         [Test]
         public void ShouldResolveDatabaseName()
         {
-            var connectionResolver = new ConnectionResolver(new string[] { "database", "user", "password" });
+            var connectionResolver = new ConnectionResolver(new Dictionary<string, string> { { "database", "database" } });
             var database = connectionResolver.ResolveDatabase();
 
             Assert.That(database, Is.EqualTo("database"));
@@ -17,7 +18,7 @@ namespace RemakeDatabase.Test
         [Test]
         public void ShouldResolveUserName()
         {
-            var connectionResolver = new ConnectionResolver(new string[] { "database", "user", "password" });
+            var connectionResolver = new ConnectionResolver(new Dictionary<string, string> { { "user", "user" }, { "password", "password" } });
             var database = connectionResolver.ResolveUser();
 
             Assert.That(database, Is.EqualTo("user"));
@@ -26,7 +27,7 @@ namespace RemakeDatabase.Test
         [Test]
         public void ShouldResolvePassword()
         {
-            var connectionResolver = new ConnectionResolver(new string[] { "database", "user", "password" });
+            var connectionResolver = new ConnectionResolver(new Dictionary<string, string> { { "user", "user" },{ "password", "password" } });
             var database = connectionResolver.ResolvePassword();
 
             Assert.That(database, Is.EqualTo("password"));
@@ -35,19 +36,19 @@ namespace RemakeDatabase.Test
         [Test]
         public void ShouldResolveConnectionString()
         {
-            var connectionResolver = new ConnectionResolver(new string[] { "database", "user", "password" });
+            var connectionResolver = new ConnectionResolver(new Dictionary<string, string> { { "user", "user" }, { "password", "password" } });
             var database = connectionResolver.ResolveConnectionString();
 
-            Assert.That(database, Is.EqualTo(@"Data Source=.\sqlexpress;Initial Catalog=master;User ID=user;Password=password"));
+            Assert.That(database, Is.EqualTo(@"Data Source=.\sqlexpress;Initial Catalog=master;User ID=user;Password=password;"));
         }
 
         [Test]
         public void ShouldAssumeIntegratedSecurityInCaseUserAndPasswordWereNotGiven()
         {
-            var connectionResolver = new ConnectionResolver(new string[] { "database" });
+            var connectionResolver = new ConnectionResolver(new Dictionary<string, string>());
             var database = connectionResolver.ResolveConnectionString();
 
-            Assert.That(database, Is.EqualTo(@"Data Source=.\sqlexpress;Initial Catalog=master;Integrated Security=true"));
+            Assert.That(database, Is.EqualTo(@"Data Source=.\sqlexpress;Initial Catalog=master;Integrated Security=true;"));
         }
     }
 }

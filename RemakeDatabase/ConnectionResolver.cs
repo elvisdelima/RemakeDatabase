@@ -1,54 +1,65 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace RemakeDatabase
 {
     public class ConnectionResolver
     {
-        private const string USER_CONNECTION_STRING =
-            @"Data Source=.\sqlexpress;Initial Catalog=master;User ID={0};Password={1}";
-        private const string INTEGRATED_SECURITY_CONNECTION_STRING =
-            @"Data Source=.\sqlexpress;Initial Catalog=master;Integrated Security=true";
+        private const string DEFAULT_SQL_INSTANCE = @".\sqlexpress";
 
-        private readonly string[] _args;
+        private readonly Dictionary<string, string> args;
 
-        public ConnectionResolver(string[] args)
+        public ConnectionResolver(Dictionary<string, string> args)
         {
-            _args = args;
+            this.args = args;
+        }
+
+        public string ResolveServer()
+        {
+            return !args.ContainsKey("server") ? DEFAULT_SQL_INSTANCE : args["server"];
         }
 
         public string ResolveDatabase()
         {
-            if(_args.Length == 0)
+            if (!args.ContainsKey("database"))
                 throw new InvalidOperationException("Database not defined");
 
-            return _args.First();
+            return args["database"];
         }
 
         public string ResolveUser()
         {
-            if (_args.Length > 1)
-                return _args[1];
+            if (args.ContainsKey("user") && args.ContainsKey("password"))
+                return args["user"];
 
             throw new InvalidOperationException("User not defined");
         }
 
         public string ResolvePassword()
         {
-            if (_args.Length > 2)
-                return _args[2];
+            if (args.ContainsKey("user") && args.ContainsKey("password"))
+                return args["password"];
 
             throw new InvalidOperationException("Password not defined");
         }
 
         public string ResolveConnectionString()
         {
-            if (_args.Length == 3)
-                return string.Format(USER_CONNECTION_STRING,
-                                     ResolveUser(),
-                                     ResolvePassword());
-
-            return string.Format(INTEGRATED_SECURITY_CONNECTION_STRING);
+            var sb = new StringBuilder();
+            sb.AppendFormat("Data Source={0};", ResolveServer());
+            sb.Append("Initial Catalog=master;");
+            if (args.ContainsKey("user") && args.ContainsKey("password"))
+            {
+                sb.AppendFormat("User ID={0};", ResolveUser());
+                sb.AppendFormat("Password={0};", ResolvePassword());
+            }
+            else
+            {
+                sb.Append("Integrated Security=true;");
+            }
+            return sb.ToString();
         }
     }
 }
