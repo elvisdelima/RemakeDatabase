@@ -50,12 +50,14 @@ namespace RemakeDatabase
                     CreateDatabase(dbName, connection, sqlCreateDatabase);
                     if (parameters.ContainsKey("script"))
                     {
-                        using (var stream = new StreamReader(parameters["script"]))
-                        using (var command = new SqlCommand())
+                        var path = parameters["script"];
+                        using (var stream = new StreamReader(path))
                         {
-                            Server server = new Server(new ServerConnection(connection));
+                            Console.WriteLine("Rodando script: {0}", path);
+                            var server = new Server(new ServerConnection(connection));
                             var readToEnd = stream.ReadToEnd();
-                            server.ConnectionContext.ExecuteNonQuery(readToEnd);
+                            Console.WriteLine("Linhas modificadas: {0}", server.ConnectionContext.ExecuteNonQuery(readToEnd));
+                            Console.WriteLine("Script executado!");
                         }
                     }
                 }
