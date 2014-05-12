@@ -1,14 +1,16 @@
 ﻿using System;
 using System.Data.SqlClient;
+using System.IO;
 using System.Linq;
+using Microsoft.SqlServer.Management.Common;
+using Microsoft.SqlServer.Management.Smo;
 
 namespace RemakeDatabase
 {
-    class Program
+    static class Program
     {
         static void Main(string[] args)
         {
-            //server=.\sqlexpress database=nash user=123 password=123
             if (args == null || !args.Any())
             {
                 Console.WriteLine("Digite o nome da base de dados:");
@@ -18,6 +20,7 @@ namespace RemakeDatabase
             var connectionStringResolver = new ConnectionResolver(parameters);
             var dbName = connectionStringResolver.ResolveDatabase();
 
+            var sqlCheckIfDatabaseExist = string.Format(@"SELECT COUNT(name) as total FROM master.dbo.sysdatabases dbs WHERE dbs.name = '{0}'", dbName);
             var sqlCloseConnections = string.Format(@"ALTER DATABASE {0} SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName);
             var sqlDropDatabase = string.Format(@"DROP DATABASE [{0}]", dbName);
             var sqlCreateDatabase = string.Format(@"CREATE DATABASE [{0}]", dbName);
@@ -31,11 +34,30 @@ namespace RemakeDatabase
                     connection.Open();
                     Console.WriteLine("Conexão aberta");
                     Console.WriteLine();
-                    RemoveActiveConnections(dbName, connection, sqlCloseConnections);
-                    Console.WriteLine();
-                    DropDatabase(connection, dbName, sqlDropDatabase);
+                    var databaseExist = DatabaseExist(dbName, connection, sqlCheckIfDatabaseExist);
+                    if (databaseExist)
+                    {
+                        Console.WriteLine("Database existe");
+                        RemoveActiveConnections(dbName, connection, sqlCloseConnections);
+                        Console.WriteLine();
+                        DropDatabase(connection, dbName, sqlDropDatabase);
+                    }
+                    else
+                    {
+                        Console.WriteLine("Database não existe");
+                    }
                     Console.WriteLine();
                     CreateDatabase(dbName, connection, sqlCreateDatabase);
+                    if (parameters.ContainsKey("script"))
+                    {
+                        using (var stream = new StreamReader(parameters["script"]))
+                        using (var command = new SqlCommand())
+                        {
+                            Server server = new Server(new ServerConnection(connection));
+                            var readToEnd = stream.ReadToEnd();
+                            server.ConnectionContext.ExecuteNonQuery(readToEnd);
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -47,13 +69,15 @@ namespace RemakeDatabase
 
         }
 
-        private static void CreateDatabase(string dbName, SqlConnection connection, string sqlCreateDatabase)
+        static bool DatabaseExist(string dbName, SqlConnection connection, string sqlCheckIfDatabaseExist)
         {
-            using (var command = new SqlCommand(sqlCreateDatabase, connection))
+            using (var command = new SqlCommand(sqlCheckIfDatabaseExist, connection))
             {
                 try
                 {
-                    ExecuteAndReportProcess(dbName, command, "Criando banco de dados", "Banco de dados criado");
+                    int total;
+                    ExecuteAndReportProcess(dbName, command, "Checando se banco de dados existe", "Existencia checada", out total);
+                    return total > 0;
                 }
                 catch (Exception e)
                 {
@@ -63,7 +87,23 @@ namespace RemakeDatabase
             }
         }
 
-        private static void DropDatabase(SqlConnection connection, string dbName, string sqlDropDatabase)
+        static void CreateDatabase(string dbName, SqlConnection connection, string sqlCreateDatabase)
+        {
+            using (var command = new SqlCommand(sqlCreateDatabase, connection))
+            {
+                try
+                {
+                    ExecuteAndReportProcess(dbName, command, "Criando banco de dados", "OK");
+                }
+                catch (Exception e)
+                {
+                    ReportErrorAndCloseConnection(e, connection);
+                    throw;
+                }
+            }
+        }
+
+        static void DropDatabase(SqlConnection connection, string dbName, string sqlDropDatabase)
         {
             using (var command = new SqlCommand(sqlDropDatabase, connection))
             {
@@ -88,7 +128,7 @@ namespace RemakeDatabase
             }
         }
 
-        private static void RemoveActiveConnections(string dbName, SqlConnection connection, string sqlCloseConnections)
+        static void RemoveActiveConnections(string dbName, SqlConnection connection, string sqlCloseConnections)
         {
             using (var command = new SqlCommand(sqlCloseConnections, connection))
             {
@@ -102,14 +142,26 @@ namespace RemakeDatabase
             }
         }
 
-        private static void ExecuteAndReportProcess(string dbName, SqlCommand command, string beforeProgess, string afterProgess)
+        static void ExecuteAndReportProcess(string dbName, SqlCommand command, string beforeProgess, string afterProgess)
         {
             Console.WriteLine("{0} {1}", beforeProgess, dbName);
             command.ExecuteNonQuery();
             Console.WriteLine("{0}", afterProgess);
         }
 
-        private static void ReportErrorAndCloseConnection(Exception e, SqlConnection connection)
+        static void ExecuteAndReportProcess(string dbName, SqlCommand command, string beforeProgess, string afterProgess, out int executeNonQuery)
+        {
+            executeNonQuery = 0;
+            Console.WriteLine("{0} {1}", beforeProgess, dbName);
+            using(var sqlDataReader = command.ExecuteReader())
+            {
+                if(sqlDataReader.Read())
+                    executeNonQuery = (int)sqlDataReader["total"];
+            }
+            Console.WriteLine("{0}", afterProgess);
+        }
+
+        static void ReportErrorAndCloseConnection(Exception e, SqlConnection connection)
         {
             Console.WriteLine(e.Message);
             connection.Close();
