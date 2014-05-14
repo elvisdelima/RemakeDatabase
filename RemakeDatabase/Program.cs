@@ -2,6 +2,7 @@
 using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Smo;
 
@@ -55,8 +56,13 @@ namespace RemakeDatabase
                         {
                             Console.WriteLine("Rodando script: {0}", path);
                             var server = new Server(new ServerConnection(connection));
-                            var readToEnd = stream.ReadToEnd();
-                            Console.WriteLine("Linhas modificadas: {0}", server.ConnectionContext.ExecuteNonQuery(readToEnd));
+                            var sqlCommand = stream.ReadToEnd();
+                            var totalStatements = Regex.Matches(sqlCommand, @"^GO\s?$", RegexOptions.Multiline).Count;
+                            var executedStatements = 0;
+                            var connectionContext = server.ConnectionContext;
+                            var barSize = Console.WindowWidth - 20;
+                            connectionContext.StatementExecuted += (sender, eventArgs) => DrawProgressBar(++executedStatements, totalStatements, barSize, '█');
+                            Console.WriteLine("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand));
                             Console.WriteLine("Script executado!");
                         }
                     }
@@ -155,9 +161,9 @@ namespace RemakeDatabase
         {
             executeNonQuery = 0;
             Console.WriteLine("{0} {1}", beforeProgess, dbName);
-            using(var sqlDataReader = command.ExecuteReader())
+            using (var sqlDataReader = command.ExecuteReader())
             {
-                if(sqlDataReader.Read())
+                if (sqlDataReader.Read())
                     executeNonQuery = (int)sqlDataReader["total"];
             }
             Console.WriteLine("{0}", afterProgess);
@@ -167,6 +173,27 @@ namespace RemakeDatabase
         {
             Console.WriteLine(e.Message);
             connection.Close();
+        }
+
+        private static void DrawProgressBar(int complete, int maxVal, int barSize, char progressCharacter)
+        {
+            Console.CursorVisible = false;
+            int left = Console.CursorLeft;
+            decimal perc = (decimal)complete / (decimal)maxVal;
+            int chars = (int)Math.Floor(perc / ((decimal)1 / (decimal)barSize));
+            string p1 = String.Empty, p2 = String.Empty;
+
+            for (int i = 0; i < chars; i++) p1 += progressCharacter;
+            for (int i = 0; i < barSize - chars; i++) p2 += progressCharacter;
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.Write(p1);
+            Console.ForegroundColor = ConsoleColor.DarkGreen;
+            Console.Write(p2);
+
+            Console.ResetColor();
+            Console.Write(" {0}%", (perc * 100).ToString("N2"));
+            Console.CursorLeft = left;
         }
     }
 }
