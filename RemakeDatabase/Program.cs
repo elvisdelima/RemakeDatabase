@@ -19,6 +19,11 @@ namespace RemakeDatabase
             remaker.ReportScriptExecuting += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.Remake();
             Console.ReadKey();
+
+            var dataSourceConnectionString = parameters.ContainsKey("src_server") ? connectionStringResolver.ResolveDataSourceConnectionString() : "";
+            if (dataSourceConnectionString != "")
+                GenerateScriptFromDataSource(dataSourceConnectionString, connectionStringResolver.ResolveSrcDatabase());
+           
         }
 
         /*static void ExecuteAndReportProcess(string dbName, SqlCommand command, string beforeProgess, string afterProgess)
@@ -28,6 +33,21 @@ namespace RemakeDatabase
             Console.WriteLine("{0}", afterProgess);
         }*/
 
+ 		static void GenerateScriptFromDataSource(string connectionString, string dataBaseName)
+        {
+            using (var sqlConn = new SqlConnection(connectionString))
+            {
+                var server = new Server(new ServerConnection(sqlConn));
+                Console.WriteLine("Conectando Servidor de Origem... Aguarde...");
+                var conectaDb = server.Databases[dataBaseName];
+                Console.WriteLine("Transferindo Script do Banco de Dados");
+                var transfer = new Transfer(conectaDb);
+                transfer.Options.ToFileOnly = transfer.Options.ScriptBatchTerminator = true;
+                transfer.Options.FileName = @"DatabaseSript_" + dataBaseName + ".sql";
+                transfer.ScriptTransfer();
+            }
+        }
+        
         private static void DrawProgressBar(int complete, int maxVal, int barSize, char progressCharacter)
         {
             Console.CursorVisible = false;
