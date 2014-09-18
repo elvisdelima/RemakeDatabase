@@ -17,7 +17,9 @@ namespace RemakeDatabase
                 Console.WriteLine("Digite o nome da base de dados:");
                 args = new[] { string.Format("database={0}", Console.ReadLine()) };
             }
+            
             var parameters = args.ToDictionary(x => x.Split('=')[0], x => x.Split('=')[1]);
+            
             var connectionStringResolver = new ConnectionResolver(parameters);
             var dbName = connectionStringResolver.ResolveDatabase();
 
@@ -25,6 +27,11 @@ namespace RemakeDatabase
             var sqlCloseConnections = string.Format(@"ALTER DATABASE {0} SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName);
             var sqlDropDatabase = string.Format(@"DROP DATABASE [{0}]", dbName);
             var sqlCreateDatabase = string.Format(@"CREATE DATABASE [{0}]", dbName);
+            
+            var dataSourceConnectionString = parameters.ContainsKey("src_server") ? connectionStringResolver.ResolveDataSourceConnectionString() : "";
+            if (dataSourceConnectionString != "")
+                GenerateScriptFromDataSource(dataSourceConnectionString, connectionStringResolver.ResolveSrcDatabase());
+           
             var connectionString = connectionStringResolver.ResolveConnectionString();
 
             using (var connection = new SqlConnection(connectionString))
@@ -49,6 +56,7 @@ namespace RemakeDatabase
                     }
                     Console.WriteLine();
                     CreateDatabase(dbName, connection, sqlCreateDatabase);
+                    
                     if (parameters.ContainsKey("script"))
                     {
                         var path = parameters["script"];
@@ -75,6 +83,21 @@ namespace RemakeDatabase
                 }
             }
 
+        }
+
+        static void GenerateScriptFromDataSource(string connectionString, string dataBaseName)
+        {
+            using (var sqlConn = new SqlConnection(connectionString))
+            {
+                var server = new Server(new ServerConnection(sqlConn));
+                Console.WriteLine("Conectando Servidor de Origem... Aguarde...");
+                var conectaDb = server.Databases[dataBaseName];
+                Console.WriteLine("Transferindo Script do Banco de Dados");
+                var transfer = new Transfer(conectaDb);
+                transfer.Options.ToFileOnly = transfer.Options.ScriptBatchTerminator = true;
+                transfer.Options.FileName = @"DatabaseSript_" + dataBaseName + ".sql";
+                transfer.ScriptTransfer();
+            }
         }
 
         static bool DatabaseExist(string dbName, SqlConnection connection, string sqlCheckIfDatabaseExist)
