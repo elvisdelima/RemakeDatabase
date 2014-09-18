@@ -58,6 +58,7 @@ namespace RemakeDatabase
             get
             {
                 var connStringBuilder = new SqlConnectionStringBuilder { DataSource = SrcServer, InitialCatalog = SrcDatabase };
+                connStringBuilder.MultipleActiveResultSets = true;
                 if (string.IsNullOrEmpty(SrcUser) && string.IsNullOrEmpty(SrcPassword))
                     connStringBuilder.IntegratedSecurity = true;
                 else
