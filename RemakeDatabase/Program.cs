@@ -16,6 +16,7 @@ namespace RemakeDatabase
 
             var remaker = new Remaker(remakeConfiguration);
             remaker.ReportProcess += Console.WriteLine;
+            remaker.ReportScriptCopying += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.ReportScriptExecuting += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.Remake();
         }

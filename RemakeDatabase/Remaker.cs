@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Smo;
 
@@ -30,6 +32,7 @@ namespace RemakeDatabase
 
         public event Action<string> ReportProcess;
         public event Action<int, int, int> ReportScriptExecuting;
+        public event Action<int, int, int> ReportScriptCopying;
 
         public void Remake()
         {
@@ -112,82 +115,72 @@ namespace RemakeDatabase
                     ReportProcess("Conectando Servidor de Origem... Aguarde...");
                     var conectaDb = server.Databases[dataBaseName];
                     ReportProcess("Transferindo Script do Banco de Dados");
-                    var transfer = new Transfer(conectaDb);
-                    transfer.Options.ToFileOnly = transfer.Options.ScriptBatchTerminator = true;
-                    transfer.Options.FileName = filename;
-                    
-                    transfer.Options.AnsiPadding = true;
-                    transfer.Options.ContinueScriptingOnError = false;
-                    transfer.Options.ConvertUserDefinedDataTypesToBaseType = false;
-                    transfer.Options.WithDependencies = false;
-                    transfer.Options.DdlHeaderOnly = true;
-                    transfer.Options.IncludeIfNotExists = false;
-                    transfer.Options.DriAllConstraints = false;
-                    transfer.Options.SchemaQualify = true;
-                    transfer.Options.Bindings = false;
-                    transfer.Options.NoCollation = false;
-                    transfer.Options.Default = true;
-                    transfer.Options.ScriptDrops = false;
-                    transfer.Options.ExtendedProperties = true;
-                    transfer.Options.TargetServerVersion = SqlServerVersion.Version110;
-                    transfer.Options.TargetDatabaseEngineType = DatabaseEngineType.Standalone;
-                    transfer.Options.LoginSid = false;
-                    transfer.Options.Permissions = false;
-                    transfer.Options.Statistics = false;
-                    //transfer.Options.ScriptData = true;
-                    transfer.Options.ChangeTracking = false;
-                    transfer.Options.DriChecks = true;
-                    transfer.Options.ScriptDataCompression = false;
-                    transfer.Options.DriForeignKeys = true;
-                    transfer.Options.FullTextIndexes = false;
-                    //transfer.Options.Indexes = true;
-                    transfer.Options.DriPrimaryKey = true;
-                    transfer.Options.Triggers = false;
-                    transfer.Options.DriUniqueKeys = true;
-                    transfer.CopyAllLogins = false;
-                    transfer.PreserveLogins = false;
-                    transfer.CopyAllUsers = false;
-                    transfer.Options.IncludeDatabaseContext = true;
+                    var scriptingOptions = new ScriptingOptions
+                        {
+                            ScriptData = true,
+                            ScriptDrops = false,
+                            FileName = filename,
+                            EnforceScriptingOptions = true,
+                            ScriptSchema = true,
+                            IncludeHeaders = true,
+                            AppendToFile = true,
+                            Indexes = true,
+                            WithDependencies = true,
+                            //ToFileOnly = true,
+                            //ScriptBatchTerminator = true,
+                            //FileName = filename,
+                            //AnsiPadding = true,
+                            //ContinueScriptingOnError = false,
+                            //ConvertUserDefinedDataTypesToBaseType = false,
+                            //WithDependencies = true,
+                            //DdlHeaderOnly = true,
+                            //IncludeIfNotExists = false,
+                            //DriAllConstraints = false,
+                            //SchemaQualify = true,
+                            //Bindings = false,
+                            //NoCollation = false,
+                            //Default = true,
+                            //ScriptDrops = false,
+                            //ExtendedProperties = true,
+                            //TargetServerVersion = SqlServerVersion.Version110,
+                            //TargetDatabaseEngineType = DatabaseEngineType.Standalone,
+                            //LoginSid = false,
+                            //Permissions = false,
+                            //Statistics = false,
+                            //ScriptData = true,
+                            //ChangeTracking = false,
+                            //DriChecks = true,
+                            ScriptDataCompression = true,
+                            //DriForeignKeys = true,
+                            //FullTextIndexes = false,
+                            //Indexes = true,
+                            //DriPrimaryKey = true,
+                            //Triggers = false,
+                            //DriUniqueKeys = true,
+                            //IncludeDatabaseContext = true
+                        };
 
-                    transfer.CopyAllObjects = false;
-                    transfer.CopyAllTables = true;
-                    transfer.Options.Encoding = Encoding.ASCII;
 
-                    transfer.ScriptingProgress += (sender, args) => ReportProcess();
-                    
-                    transfer.ScriptTransfer();
-
-                    var b = Encoding.ASCII.GetBytes(string.Format("USE [{0}] \n GO \n", dataBaseName));
-                    byte[] bb;
-                    using (var f = File.Open(filename, FileMode.Open))
+                    int currentTable = 0, totalTables = conectaDb.Tables.Count, barSize = Console.WindowWidth - 20;
+                    File.AppendAllText(filename, string.Format("USE [{0}] \n GO \n", dataBaseName));
+                    var lines = new List<string>();
+                    foreach (Table tbl in conectaDb.Tables)
                     {
-                        bb = new byte[f.Length];
-                        f.Read(bb, 0, bb.Length);
-                        f.Close();
-                        f.Dispose();
+                        lines.AddRange(tbl.EnumScript(scriptingOptions));
+                        ReportScriptCopying(currentTable++, totalTables, barSize);
                     }
 
-                    var @bytes = new List<byte>();
-                    @bytes.AddRange(b);
-                    @bytes.AddRange(bb);
-
-                    using (var t = File.Open(filename, FileMode.Open))
-                    {
-                        t.Write(@bytes.ToArray(), 0, @bytes.Count);
-                        t.Close();
-                        t.Dispose();
-                    }
-
+                    ReportProcess("");
                     ReportProcess("Transferência de Script finalizada");
                 }
-                finally 
+                finally
                 {
                     sqlConn.Close();
                 }
             }
             return filename;
         }
-        
+
         private int ExecuteAndReportProcess(SqlCommand command, string beforeProgess, string afterProgess)
         {
             var executeNonQuery = 0;
@@ -195,7 +188,7 @@ namespace RemakeDatabase
             using (var sqlDataReader = command.ExecuteReader())
             {
                 if (sqlDataReader.Read())
-                    executeNonQuery = (int) sqlDataReader["total"];
+                    executeNonQuery = (int)sqlDataReader["total"];
             }
             ReportProcess(afterProgess);
             return executeNonQuery;
