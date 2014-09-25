@@ -40,9 +40,11 @@ namespace RemakeDatabase
             {
                 try
                 {
-                    if (!String.IsNullOrEmpty(remakeConfiguration.SrcServer))
-                        remakeConfiguration.Script = GenerateScriptFromDataSource(remakeConfiguration.ConnectionStringBuilder, remakeConfiguration.SrcDatabase);
-
+                    var shouldGetScriptsFromDataSource = !String.IsNullOrEmpty(remakeConfiguration.SrcServer);
+                    IEnumerable<string> scriptsFromSource = null;
+                    if (shouldGetScriptsFromDataSource)
+                        scriptsFromSource = GenerateScriptFromDataSource(remakeConfiguration.ConnectionStringBuilder, remakeConfiguration.SrcDatabase);
+                    
                     ReportProcess("Abrindo conexão com banco de dados");
                     connection.Open();
                     ReportProcess("Conexão aberta");
@@ -61,22 +63,19 @@ namespace RemakeDatabase
                     }
                     ReportProcess("");
                     CreateDatabase(connection);
-                    if (!string.IsNullOrWhiteSpace(remakeConfiguration.Script))
+
+                    if (shouldGetScriptsFromDataSource)
                     {
-                        var path = remakeConfiguration.Script;
-                        using (var stream = new StreamReader(path))
-                        {
-                            ReportProcess(string.Format("Rodando script: {0}", path));
-                            var server = new Server(new ServerConnection(connection));
-                            var sqlCommand = stream.ReadToEnd();
-                            var totalStatements = Regex.Matches(sqlCommand, @"^GO\s?$", RegexOptions.Multiline).Count;
-                            var executedStatements = 0;
-                            var connectionContext = server.ConnectionContext;
-                            var barSize = Console.WindowWidth - 20;
-                            connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
-                            ReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)));
-                            ReportProcess("Script executado!");
-                        }
+                        ReportProcess("Rodando script");
+                        var server = new Server(new ServerConnection(connection));
+                        var sqlCommand = string.Join("\n", scriptsFromSource).Replace("\n", "\nGO\n");
+                        var totalStatements = scriptsFromSource.Count();
+                        var executedStatements = 0;
+                        var connectionContext = server.ConnectionContext;
+                        var barSize = Console.WindowWidth - 20;
+                        connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
+                        ReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)));
+                        ReportProcess("Script executado!");
                     }
                 }
                 catch (Exception e)
@@ -103,84 +102,79 @@ namespace RemakeDatabase
             }
         }
 
-        private string GenerateScriptFromDataSource(string connectionString, string dataBaseName)
+        private IEnumerable<string> GenerateScriptFromDataSource(string connectionString, string dataBaseName)
         {
             var filename = @"DatabaseSript_" + dataBaseName + ".sql";
-
             using (var sqlConn = new SqlConnection(connectionString))
             {
-                try
-                {
-                    var server = new Server(new ServerConnection(sqlConn));
-                    ReportProcess("Conectando Servidor de Origem... Aguarde...");
-                    var conectaDb = server.Databases[dataBaseName];
-                    ReportProcess("Transferindo Script do Banco de Dados");
-                    var scriptingOptions = new ScriptingOptions
-                        {
-                            ScriptData = true,
-                            ScriptDrops = false,
-                            FileName = filename,
-                            EnforceScriptingOptions = true,
-                            ScriptSchema = true,
-                            IncludeHeaders = true,
-                            AppendToFile = true,
-                            Indexes = true,
-                            WithDependencies = true,
-                            //ToFileOnly = true,
-                            //ScriptBatchTerminator = true,
-                            //FileName = filename,
-                            //AnsiPadding = true,
-                            //ContinueScriptingOnError = false,
-                            //ConvertUserDefinedDataTypesToBaseType = false,
-                            //WithDependencies = true,
-                            //DdlHeaderOnly = true,
-                            //IncludeIfNotExists = false,
-                            //DriAllConstraints = false,
-                            //SchemaQualify = true,
-                            //Bindings = false,
-                            //NoCollation = false,
-                            //Default = true,
-                            //ScriptDrops = false,
-                            //ExtendedProperties = true,
-                            //TargetServerVersion = SqlServerVersion.Version110,
-                            //TargetDatabaseEngineType = DatabaseEngineType.Standalone,
-                            //LoginSid = false,
-                            //Permissions = false,
-                            //Statistics = false,
-                            //ScriptData = true,
-                            //ChangeTracking = false,
-                            //DriChecks = true,
-                            ScriptDataCompression = true,
-                            //DriForeignKeys = true,
-                            //FullTextIndexes = false,
-                            //Indexes = true,
-                            //DriPrimaryKey = true,
-                            //Triggers = false,
-                            //DriUniqueKeys = true,
-                            //IncludeDatabaseContext = true
-                        };
+                ReportProcess("Conectando Servidor de Origem");
+                var server = new Server(new ServerConnection(sqlConn));
+                server.SetDefaultInitFields(typeof(Table), true);
+                Database db = server.Databases[dataBaseName];
 
-
-                    int currentTable = 0, totalTables = conectaDb.Tables.Count, barSize = Console.WindowWidth - 20;
-                    File.AppendAllText(filename, string.Format("USE [{0}] \n GO \n", dataBaseName));
-                    var lines = new List<string>();
-                    foreach (Table tbl in conectaDb.Tables)
+                var scriptingOptions = new ScriptingOptions
                     {
-                        lines.AddRange(tbl.EnumScript(scriptingOptions));
-                        ReportScriptCopying(currentTable++, totalTables, barSize);
-                    }
+                        ToFileOnly = true,
+                        ScriptBatchTerminator = true,
+                        AnsiPadding = true,
+                        ContinueScriptingOnError = false,
+                        ConvertUserDefinedDataTypesToBaseType = false,
+                        WithDependencies = true,
+                        DdlHeaderOnly = true,
+                        IncludeIfNotExists = false,
+                        DriAllConstraints = false,
+                        SchemaQualify = true,
+                        Bindings = false,
+                        NoCollation = false,
+                        Default = true,
+                        ScriptDrops = false,
+                        ExtendedProperties = true,
+                        TargetServerVersion = SqlServerVersion.Version110,
+                        TargetDatabaseEngineType = DatabaseEngineType.Standalone,
+                        LoginSid = false,
+                        Permissions = false,
+                        Statistics = false,
+                        ScriptData = true,
+                        ChangeTracking = false,
+                        DriChecks = true,
+                        ScriptDataCompression = true,
+                        DriForeignKeys = true,
+                        FullTextIndexes = false,
+                        Indexes = true,
+                        DriPrimaryKey = true,
+                        Triggers = false,
+                        DriUniqueKeys = true,
+                        IncludeDatabaseContext = true,
+                        Encoding = Encoding.UTF8
+                    };
 
-                    ReportProcess("");
-                    ReportProcess("Transferência de Script finalizada");
-                }
-                finally
+                scriptingOptions.AllowSystemObjects = false;
+
+                var dt = db.EnumObjects(DatabaseObjectTypes.Table);
+                var urns = new Microsoft.SqlServer.Management.Sdk.Sfc.Urn[dt.Rows.Count];
+
+                //get urns of tables to script
+                for (int rowIndex = 0; rowIndex < dt.Rows.Count; ++rowIndex)
                 {
-                    sqlConn.Close();
+                    urns[rowIndex] = dt.Rows[rowIndex]["urn"].ToString();
                 }
-            }
-            return filename;
-        }
 
+                ReportProcess("Transferindo Script do Banco de Dados... Aguarde...");
+
+                //script tables
+                var scripter = new Scripter(server);
+                scripter.Options = scriptingOptions;
+                var scripts = scripter.EnumScript(urns);
+                
+                File.WriteAllText(filename, string.Format("USE [{0}] \nGO \n", dataBaseName));
+
+                ReportProcess("");
+                ReportProcess("Transferência de Script finalizada");
+
+                return scripts;
+            }
+        }
+        
         private int ExecuteAndReportProcess(SqlCommand command, string beforeProgess, string afterProgess)
         {
             var executeNonQuery = 0;
