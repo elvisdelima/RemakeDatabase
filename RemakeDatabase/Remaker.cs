@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.SqlClient;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -40,11 +41,9 @@ namespace RemakeDatabase
             {
                 try
                 {
-                    var shouldGetScriptsFromDataSource = !String.IsNullOrEmpty(remakeConfiguration.SrcServer);
-                    IEnumerable<string> scriptsFromSource = null;
-                    if (shouldGetScriptsFromDataSource)
-                        scriptsFromSource = GenerateScriptFromDataSource(remakeConfiguration.ConnectionStringBuilder, remakeConfiguration.SrcDatabase);
-                    
+                    if (!String.IsNullOrEmpty(remakeConfiguration.SrcServer))
+                        remakeConfiguration.Script = GenerateScriptFromDataSource(remakeConfiguration.ConnectionStringBuilder, remakeConfiguration.SrcDatabase);
+
                     ReportProcess("Abrindo conexão com banco de dados");
                     connection.Open();
                     ReportProcess("Conexão aberta");
@@ -64,18 +63,22 @@ namespace RemakeDatabase
                     ReportProcess("");
                     CreateDatabase(connection);
 
-                    if (shouldGetScriptsFromDataSource)
+                    if (!string.IsNullOrWhiteSpace(remakeConfiguration.Script))
                     {
-                        ReportProcess("Rodando script");
-                        var server = new Server(new ServerConnection(connection));
-                        var sqlCommand = string.Join("\n", scriptsFromSource).Replace("\n", "\nGO\n");
-                        var totalStatements = scriptsFromSource.Count();
-                        var executedStatements = 0;
-                        var connectionContext = server.ConnectionContext;
-                        var barSize = Console.WindowWidth - 20;
-                        connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
-                        ReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)));
-                        ReportProcess("Script executado!");
+                        var path = remakeConfiguration.Script;
+                        using (var stream = new StreamReader(path))
+                        {
+                            ReportProcess(string.Format("Rodando script: {0}", path));
+                            var server = new Server(new ServerConnection(connection));
+                            var sqlCommand = stream.ReadToEnd();
+                            var totalStatements = Regex.Matches(sqlCommand, @"^GO\s?$", RegexOptions.Multiline).Count;
+                            var executedStatements = 0;
+                            var connectionContext = server.ConnectionContext;
+                            var barSize = Console.WindowWidth - 20;
+                            connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
+                            ReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)));
+                            ReportProcess("Script executado!");
+                        }
                     }
                 }
                 catch (Exception e)
@@ -102,7 +105,7 @@ namespace RemakeDatabase
             }
         }
 
-        private IEnumerable<string> GenerateScriptFromDataSource(string connectionString, string dataBaseName)
+        private string GenerateScriptFromDataSource(string connectionString, string dataBaseName)
         {
             var filename = @"DatabaseSript_" + dataBaseName + ".sql";
             using (var sqlConn = new SqlConnection(connectionString))
@@ -114,6 +117,7 @@ namespace RemakeDatabase
 
                 var scriptingOptions = new ScriptingOptions
                     {
+                        FileName =  @"DatabaseSript_" + dataBaseName + ".sql",
                         ToFileOnly = true,
                         ScriptBatchTerminator = true,
                         AnsiPadding = true,
@@ -145,15 +149,14 @@ namespace RemakeDatabase
                         Triggers = false,
                         DriUniqueKeys = true,
                         IncludeDatabaseContext = true,
-                        Encoding = Encoding.UTF8
+                        Encoding = Encoding.UTF8,
+                        NoCommandTerminator = false
                     };
-
+                
                 scriptingOptions.AllowSystemObjects = false;
-
                 var dt = db.EnumObjects(DatabaseObjectTypes.Table);
                 var urns = new Microsoft.SqlServer.Management.Sdk.Sfc.Urn[dt.Rows.Count];
 
-                //get urns of tables to script
                 for (int rowIndex = 0; rowIndex < dt.Rows.Count; ++rowIndex)
                 {
                     urns[rowIndex] = dt.Rows[rowIndex]["urn"].ToString();
@@ -161,17 +164,14 @@ namespace RemakeDatabase
 
                 ReportProcess("Transferindo Script do Banco de Dados... Aguarde...");
 
-                //script tables
                 var scripter = new Scripter(server);
                 scripter.Options = scriptingOptions;
-                var scripts = scripter.EnumScript(urns);
+                scripter.EnumScript(urns);
                 
-                File.WriteAllText(filename, string.Format("USE [{0}] \nGO \n", dataBaseName));
-
                 ReportProcess("");
                 ReportProcess("Transferência de Script finalizada");
 
-                return scripts;
+                return filename;
             }
         }
         
