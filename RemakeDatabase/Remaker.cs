@@ -1,7 +1,12 @@
-Ôªøusing System;
+using System;
+using System.Collections.Generic;
 using System.Data.SqlClient;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Smo;
 
@@ -28,6 +33,7 @@ namespace RemakeDatabase
 
         public event Action<string> ReportProcess;
         public event Action<int, int, int> ReportScriptExecuting;
+        public event Action<int, int, int> ReportScriptCopying;
 
         public void Remake()
         {
@@ -35,9 +41,12 @@ namespace RemakeDatabase
             {
                 try
                 {
-                    ReportProcess("Abrindo conex√£o com banco de dados");
+                    if (!String.IsNullOrEmpty(remakeConfiguration.SrcServer))
+                        remakeConfiguration.Script = GenerateScriptFromDataSource(remakeConfiguration.ConnectionStringBuilder, remakeConfiguration.SrcDatabase);
+
+                    ReportProcess("Abrindo conex„o com banco de dados");
                     connection.Open();
-                    ReportProcess("Conex√£o aberta");
+                    ReportProcess("Conex„o aberta");
                     ReportProcess("");
                     var databaseExist = DatabaseExist(connection);
                     if (databaseExist)
@@ -49,10 +58,11 @@ namespace RemakeDatabase
                     }
                     else
                     {
-                        ReportProcess("Database n√£o existe");
+                        ReportProcess("Database n„o existe");
                     }
                     ReportProcess("");
                     CreateDatabase(connection);
+
                     if (!string.IsNullOrWhiteSpace(remakeConfiguration.Script))
                     {
                         var path = remakeConfiguration.Script;
@@ -95,6 +105,76 @@ namespace RemakeDatabase
             }
         }
 
+        private string GenerateScriptFromDataSource(string connectionString, string dataBaseName)
+        {
+            var filename = @"DatabaseSript_" + dataBaseName + ".sql";
+            using (var sqlConn = new SqlConnection(connectionString))
+            {
+                ReportProcess("Conectando Servidor de Origem");
+                var server = new Server(new ServerConnection(sqlConn));
+                server.SetDefaultInitFields(typeof(Table), true);
+                Database db = server.Databases[dataBaseName];
+
+                var scriptingOptions = new ScriptingOptions
+                    {
+                        FileName =  @"DatabaseSript_" + dataBaseName + ".sql",
+                        ToFileOnly = true,
+                        ScriptBatchTerminator = true,
+                        AnsiPadding = true,
+                        ContinueScriptingOnError = false,
+                        ConvertUserDefinedDataTypesToBaseType = false,
+                        WithDependencies = true,
+                        DdlHeaderOnly = true,
+                        IncludeIfNotExists = false,
+                        DriAllConstraints = false,
+                        SchemaQualify = true,
+                        Bindings = false,
+                        NoCollation = false,
+                        Default = true,
+                        ScriptDrops = false,
+                        ExtendedProperties = true,
+                        TargetServerVersion = SqlServerVersion.Version110,
+                        TargetDatabaseEngineType = DatabaseEngineType.Standalone,
+                        LoginSid = false,
+                        Permissions = false,
+                        Statistics = false,
+                        ScriptData = true,
+                        ChangeTracking = false,
+                        DriChecks = true,
+                        ScriptDataCompression = true,
+                        DriForeignKeys = true,
+                        FullTextIndexes = false,
+                        Indexes = true,
+                        DriPrimaryKey = true,
+                        Triggers = false,
+                        DriUniqueKeys = true,
+                        IncludeDatabaseContext = true,
+                        Encoding = Encoding.UTF8,
+                        NoCommandTerminator = false
+                    };
+                
+                scriptingOptions.AllowSystemObjects = false;
+                var dt = db.EnumObjects(DatabaseObjectTypes.Table);
+                var urns = new Microsoft.SqlServer.Management.Sdk.Sfc.Urn[dt.Rows.Count];
+
+                for (int rowIndex = 0; rowIndex < dt.Rows.Count; ++rowIndex)
+                {
+                    urns[rowIndex] = dt.Rows[rowIndex]["urn"].ToString();
+                }
+
+                ReportProcess("Transferindo Script do Banco de Dados... Aguarde...");
+
+                var scripter = new Scripter(server);
+                scripter.Options = scriptingOptions;
+                scripter.EnumScript(urns);
+                
+                ReportProcess("");
+                ReportProcess("TransferÍncia de Script finalizada");
+
+                return filename;
+            }
+        }
+        
         private int ExecuteAndReportProcess(SqlCommand command, string beforeProgess, string afterProgess)
         {
             var executeNonQuery = 0;
@@ -102,7 +182,7 @@ namespace RemakeDatabase
             using (var sqlDataReader = command.ExecuteReader())
             {
                 if (sqlDataReader.Read())
-                    executeNonQuery = (int) sqlDataReader["total"];
+                    executeNonQuery = (int)sqlDataReader["total"];
             }
             ReportProcess(afterProgess);
             return executeNonQuery;
@@ -140,7 +220,7 @@ namespace RemakeDatabase
                 catch (SqlException e)
                 {
                     if (e.Number == 3701)
-                        ReportProcess(string.Format("Banco de dados {0} n√£o existe, continuado para processo de cria√ß√£o", remakeConfiguration.Database));
+                        ReportProcess(string.Format("Banco de dados {0} n„o existe, continuado para processo de criaÁ„o", remakeConfiguration.Database));
                     else
                         throw;
                 }
@@ -157,7 +237,7 @@ namespace RemakeDatabase
             {
                 try
                 {
-                    ExecuteAndReportProcess(command, "Removendo conex√µes existentes com o banco de dados", "Conex√µes removidas");
+                    ExecuteAndReportProcess(command, "Removendo conexıes existentes com o banco de dados", "Conexıes removidas");
                 }
                 catch (Exception e)
                 {

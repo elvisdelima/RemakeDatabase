@@ -16,18 +16,11 @@ namespace RemakeDatabase
 
             var remaker = new Remaker(remakeConfiguration);
             remaker.ReportProcess += Console.WriteLine;
+            remaker.ReportScriptCopying += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.ReportScriptExecuting += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.Remake();
-            Console.ReadKey();
         }
-
-        /*static void ExecuteAndReportProcess(string dbName, SqlCommand command, string beforeProgess, string afterProgess)
-        {
-            Console.WriteLine("{0} {1}", beforeProgess, dbName);
-            command.ExecuteNonQuery();
-            Console.WriteLine("{0}", afterProgess);
-        }*/
-
+        
         private static void DrawProgressBar(int complete, int maxVal, int barSize, char progressCharacter)
         {
             Console.CursorVisible = false;
