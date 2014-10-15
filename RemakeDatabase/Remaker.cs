@@ -65,19 +65,16 @@ namespace RemakeDatabase
                     if (!string.IsNullOrWhiteSpace(config.Script))
                     {
                         var path = config.Script;
-                        using (var stream = new StreamReader(path))
-                        {
-                            DoReportProcess(string.Format("Rodando script: {0}", path), true);
-                            var server = new Server(new ServerConnection(connection));
-                            var sqlCommand = stream.ReadToEnd();
-                            var totalStatements = Regex.Matches(sqlCommand, @"^GO\s?$", RegexOptions.Multiline).Count;
-                            var executedStatements = 0;
-                            var connectionContext = server.ConnectionContext;
-                            var barSize = Console.WindowWidth - 20;
-                            connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
-                            DoReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)), false);
-                            DoReportProcess("Script executado!", false);
-                        }
+                        DoReportProcess(string.Format("Rodando script: {0}", path), true);
+                        var server = new Server(new ServerConnection(connection));
+                        var sqlCommand = File.ReadAllText(path);
+                        var totalStatements = Regex.Matches(sqlCommand, @"^GO\s?$", RegexOptions.Multiline).Count;
+                        var executedStatements = 0;
+                        var connectionContext = server.ConnectionContext;
+                        var barSize = Console.WindowWidth - 20;
+                        connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
+                        DoReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)), false);
+                        DoReportProcess("Script executado!", false);
                     }
                 }
                 catch (Exception e)
@@ -132,6 +129,7 @@ namespace RemakeDatabase
 
             scriptOutputOptions.Set("SaveFileName", filename);
             sqlScriptPublishModel.Set("ScriptAllObjects", true);
+            //sqlScriptPublishModel.Set("SkipCreateDatabase", true);
             var advancedOptions = sqlScriptPublishModel.Get("AdvancedOptions");
             advancedOptions.Set("ConvertUDDTToBaseType", 1);
             advancedOptions.Set("ScriptUseDatabase", 0);
@@ -173,6 +171,8 @@ namespace RemakeDatabase
             var useDb = new[] { string.Format("USE [{0}]", database) };
             var script = string.Join(Environment.NewLine, useDb.Concat(File.ReadLines(filename).Skip(15)));
             script = Regex.Replace(script, string.Format(@"\[{0}\]", dataBaseName), "[" + database + "]");
+            var pattern = string.Format(@"\/\*+[\s\w:]+\[(\w+)\][\s\w:/]+\*+\/{0}CREATE USER \[\1\] FOR LOGIN \[\1\] WITH DEFAULT_SCHEMA=\[dbo\]{0}GO{0}sys.sp_addrolemember @rolename = N'db_owner', @membername = N'\1'{0}GO{0}", Environment.NewLine);
+            script = Regex.Replace(script, pattern, string.Empty);
             File.WriteAllText(filename, script);
 
             return filename;
