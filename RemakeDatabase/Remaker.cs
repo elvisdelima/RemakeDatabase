@@ -1,12 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
+using System.Reflection;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Smo;
 
@@ -15,25 +13,26 @@ namespace RemakeDatabase
     public class Remaker : IRemaker
     {
         private readonly string connectionString;
-        private readonly RemakeConfiguration remakeConfiguration;
+        private readonly RemakeConfiguration config;
         private readonly string sqlCheckIfDatabaseExist;
         private readonly string sqlCloseConnections;
         private readonly string sqlCreateDatabase;
         private readonly string sqlDropDatabase;
+        private readonly Stopwatch stopwatch;
 
-        public Remaker(RemakeConfiguration remakeConfiguration)
+        public Remaker(RemakeConfiguration config)
         {
-            this.remakeConfiguration = remakeConfiguration;
-            sqlCheckIfDatabaseExist = string.Format(@"SELECT COUNT(name) as total FROM master.dbo.sysdatabases dbs WHERE dbs.name = '{0}'", remakeConfiguration.Database);
-            sqlCloseConnections = string.Format(@"ALTER DATABASE {0} SET SINGLE_USER WITH ROLLBACK IMMEDIATE", remakeConfiguration.Database);
-            sqlDropDatabase = string.Format(@"DROP DATABASE [{0}]", remakeConfiguration.Database);
-            sqlCreateDatabase = string.Format(@"CREATE DATABASE [{0}]", remakeConfiguration.Database);
-            connectionString = remakeConfiguration.ServerConnectionString;
+            this.config = config;
+            sqlCheckIfDatabaseExist = string.Format(@"SELECT COUNT(name) as total FROM master.dbo.sysdatabases dbs WHERE dbs.name = '{0}'", config.Database);
+            sqlCloseConnections = string.Format(@"ALTER DATABASE {0} SET SINGLE_USER WITH ROLLBACK IMMEDIATE", config.Database);
+            sqlDropDatabase = string.Format(@"DROP DATABASE [{0}]", config.Database);
+            sqlCreateDatabase = string.Format(@"CREATE DATABASE [{0}]", config.Database);
+            connectionString = config.ServerConnectionString;
+            stopwatch = new Stopwatch();
         }
 
         public event Action<string> ReportProcess;
         public event Action<int, int, int> ReportScriptExecuting;
-        public event Action<int, int, int> ReportScriptCopying;
 
         public void Remake()
         {
@@ -41,34 +40,34 @@ namespace RemakeDatabase
             {
                 try
                 {
-                    if (!String.IsNullOrEmpty(remakeConfiguration.SrcServer))
-                        remakeConfiguration.Script = GenerateScriptFromDataSource(remakeConfiguration.ConnectionStringBuilder, remakeConfiguration.SrcDatabase);
+                    if (!String.IsNullOrEmpty(config.SrcServer))
+                        config.Script = GenerateScriptFromDataSource(config.ConnectionStringBuilder, config.SrcDatabase, config.Database);
 
-                    ReportProcess("Abrindo conex„o com banco de dados");
+                    DoReportProcess("Abrindo conex√£o com banco de dados", true);
                     connection.Open();
-                    ReportProcess("Conex„o aberta");
-                    ReportProcess("");
+                    DoReportProcess("Conex√£o aberta", false);
+                    DoReportProcess("", false);
                     var databaseExist = DatabaseExist(connection);
                     if (databaseExist)
                     {
-                        ReportProcess("Database existe");
+                        DoReportProcess("Database existe", false);
                         RemoveActiveConnections(connection);
-                        ReportProcess("");
+                        DoReportProcess("", false);
                         DropDatabase(connection);
                     }
                     else
                     {
-                        ReportProcess("Database n„o existe");
+                        DoReportProcess("Database n√£o existe", false);
                     }
-                    ReportProcess("");
+                    DoReportProcess("", false);
                     CreateDatabase(connection);
 
-                    if (!string.IsNullOrWhiteSpace(remakeConfiguration.Script))
+                    if (!string.IsNullOrWhiteSpace(config.Script))
                     {
-                        var path = remakeConfiguration.Script;
+                        var path = config.Script;
                         using (var stream = new StreamReader(path))
                         {
-                            ReportProcess(string.Format("Rodando script: {0}", path));
+                            DoReportProcess(string.Format("Rodando script: {0}", path), true);
                             var server = new Server(new ServerConnection(connection));
                             var sqlCommand = stream.ReadToEnd();
                             var totalStatements = Regex.Matches(sqlCommand, @"^GO\s?$", RegexOptions.Multiline).Count;
@@ -76,8 +75,8 @@ namespace RemakeDatabase
                             var connectionContext = server.ConnectionContext;
                             var barSize = Console.WindowWidth - 20;
                             connectionContext.StatementExecuted += (sender, eventArgs) => ReportScriptExecuting(++executedStatements, totalStatements, barSize);
-                            ReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)));
-                            ReportProcess("Script executado!");
+                            DoReportProcess(string.Format("\nLinhas modificadas: {0}", connectionContext.ExecuteNonQuery(sqlCommand)), false);
+                            DoReportProcess("Script executado!", false);
                         }
                     }
                 }
@@ -87,6 +86,19 @@ namespace RemakeDatabase
                     ReportErrorAndCloseConnection(e, connection);
                 }
             }
+        }
+
+        private void DoReportProcess(string message, bool startStopwatch)
+        {
+            if (startStopwatch)
+                stopwatch.Restart();
+            else if (stopwatch.IsRunning)
+            {
+                stopwatch.Stop();
+                message = string.Format("{0} - Executado em {1}", message, stopwatch.Elapsed);
+            }
+
+            ReportProcess(message);
         }
 
         private bool DatabaseExist(SqlConnection connection)
@@ -105,92 +117,83 @@ namespace RemakeDatabase
             }
         }
 
-        private string GenerateScriptFromDataSource(string connectionString, string dataBaseName)
+        private string GenerateScriptFromDataSource(string serverConnectionString, string dataBaseName, string database)
         {
-            var filename = @"DatabaseSript_" + dataBaseName + ".sql";
-            using (var sqlConn = new SqlConnection(connectionString))
-            {
-                ReportProcess("Conectando Servidor de Origem");
-                var server = new Server(new ServerConnection(sqlConn));
-                server.SetDefaultInitFields(typeof(Table), true);
-                Database db = server.Databases[dataBaseName];
+            var filename = Path.Combine(Environment.CurrentDirectory, @"DatabaseSript_" + dataBaseName + ".sql");
 
-                var scriptingOptions = new ScriptingOptions
-                    {
-                        FileName =  @"DatabaseSript_" + dataBaseName + ".sql",
-                        ToFileOnly = true,
-                        ScriptBatchTerminator = true,
-                        AnsiPadding = true,
-                        ContinueScriptingOnError = false,
-                        ConvertUserDefinedDataTypesToBaseType = false,
-                        WithDependencies = true,
-                        DdlHeaderOnly = true,
-                        IncludeIfNotExists = false,
-                        DriAllConstraints = false,
-                        SchemaQualify = true,
-                        Bindings = false,
-                        NoCollation = false,
-                        Default = true,
-                        ScriptDrops = false,
-                        ExtendedProperties = true,
-                        TargetServerVersion = SqlServerVersion.Version110,
-                        TargetDatabaseEngineType = DatabaseEngineType.Standalone,
-                        LoginSid = false,
-                        Permissions = false,
-                        Statistics = false,
-                        ScriptData = true,
-                        ChangeTracking = false,
-                        DriChecks = true,
-                        ScriptDataCompression = true,
-                        DriForeignKeys = true,
-                        FullTextIndexes = false,
-                        Indexes = true,
-                        DriPrimaryKey = true,
-                        Triggers = false,
-                        DriUniqueKeys = true,
-                        IncludeDatabaseContext = true,
-                        Encoding = Encoding.UTF8,
-                        NoCommandTerminator = false
-                    };
-                
-                scriptingOptions.AllowSystemObjects = false;
-                var dt = db.EnumObjects(DatabaseObjectTypes.Table);
-                var urns = new Microsoft.SqlServer.Management.Sdk.Sfc.Urn[dt.Rows.Count];
+            var assembly = Assembly.LoadFile(Path.Combine(Environment.CurrentDirectory, @"Microsoft.SqlServer.Management.SqlScriptPublishModel.dll"));
 
-                for (int rowIndex = 0; rowIndex < dt.Rows.Count; ++rowIndex)
-                {
-                    urns[rowIndex] = dt.Rows[rowIndex]["urn"].ToString();
-                }
+            var sqlScriptPublishModelTypes = assembly.GetTypes();
+            var typeSqlScriptPublishModel = sqlScriptPublishModelTypes.First(t => t.Name.Contains("SqlScriptPublishModel"));
+            var typeScriptOutputOptions = sqlScriptPublishModelTypes.First(t => t.Name.Contains("ScriptOutputOptions"));
 
-                ReportProcess("Transferindo Script do Banco de Dados... Aguarde...");
+            var sqlScriptPublishModel = Activator.CreateInstance(typeSqlScriptPublishModel, new[] { serverConnectionString });
+            var scriptOutputOptions = Activator.CreateInstance(typeScriptOutputOptions);
 
-                var scripter = new Scripter(server);
-                scripter.Options = scriptingOptions;
-                scripter.EnumScript(urns);
-                
-                ReportProcess("");
-                ReportProcess("TransferÍncia de Script finalizada");
+            scriptOutputOptions.Set("SaveFileName", filename);
+            sqlScriptPublishModel.Set("ScriptAllObjects", true);
+            var advancedOptions = sqlScriptPublishModel.Get("AdvancedOptions");
+            advancedOptions.Set("ConvertUDDTToBaseType", 1);
+            advancedOptions.Set("ScriptUseDatabase", 0);
+            advancedOptions.Set("ScriptLogins", 1);
+            advancedOptions.Set("ScriptCreateDrop", 0);
+            advancedOptions.Set("TypeOfDataToScript", 0);
+            advancedOptions.Set("ScriptObjectLevelPermissions", 1);
+            advancedOptions.Set("ScriptOwner", 1);
+            advancedOptions.Set("GenerateScriptForDependentObjects", 0);
+            advancedOptions.Set("IncludeDescriptiveHeaders", 0);
+            advancedOptions.Set("IncludeVarDecimal", 1);
+            advancedOptions.Set("Bindings", 1);
+            advancedOptions.Set("ContinueScriptingOnError", 1);
+            advancedOptions.Set("AppendToFile", 1);
+            advancedOptions.Set("ScriptExtendedProperties", 1);
+            advancedOptions.Set("ScriptStatistics", 0);
+            advancedOptions.Set("ScriptDriIncludeSystemNames", 1);
+            advancedOptions.Set("ScriptAnsiPadding", 0);
+            advancedOptions.Set("SchemaQualify", 0);
+            advancedOptions.Set("IncludeIfNotExists", 1);
+            advancedOptions.Set("Collation", 0);
+            advancedOptions.Set("Default", 0);
+            advancedOptions.Set("ScriptCompatibilityOption", 1);
+            advancedOptions.Set("TargetDatabaseEngineType", 0);
+            advancedOptions.Set("IncludeUnsupportedStatements", 1);
+            advancedOptions.Set("ScriptIndexes", 0);
+            advancedOptions.Set("ScriptFullTextIndexes", 1);
+            advancedOptions.Set("ScriptTriggers", 1);
+            advancedOptions.Set("ScriptPrimaryKeys", 0);
+            advancedOptions.Set("UniqueKeys", 0);
+            advancedOptions.Set("ScriptForeignKeys", 0);
+            advancedOptions.Set("ScriptChangeTracking", 1);
+            advancedOptions.Set("ScriptDataCompressionOptions", 1);
+            advancedOptions.Set("ScriptCheckConstraints", 0);
+            DoReportProcess("Transferindo Script do Banco de Dados... Aguarde...", true);
+            sqlScriptPublishModel.InvokeMethod("GenerateScript", scriptOutputOptions);
+            DoReportProcess("Transfer√™ncia de Script finalizada", false);
 
-                return filename;
-            }
+            var useDb = new[] { string.Format("USE [{0}]", database) };
+            var script = string.Join(Environment.NewLine, useDb.Concat(File.ReadLines(filename).Skip(15)));
+            script = Regex.Replace(script, string.Format(@"\[{0}\]", dataBaseName), "[" + database + "]");
+            File.WriteAllText(filename, script);
+
+            return filename;
         }
-        
+
         private int ExecuteAndReportProcess(SqlCommand command, string beforeProgess, string afterProgess)
         {
             var executeNonQuery = 0;
-            ReportProcess(string.Format("{0} {1}", beforeProgess, remakeConfiguration.Database));
+            DoReportProcess(string.Format("{0} {1}", beforeProgess, config.Database), true);
             using (var sqlDataReader = command.ExecuteReader())
             {
                 if (sqlDataReader.Read())
                     executeNonQuery = (int)sqlDataReader["total"];
             }
-            ReportProcess(afterProgess);
+            DoReportProcess(afterProgess, false);
             return executeNonQuery;
         }
 
         private void ReportErrorAndCloseConnection(Exception e, SqlConnection connection)
         {
-            ReportProcess(e.Message);
+            DoReportProcess(e.Message, false);
             connection.Close();
         }
 
@@ -220,7 +223,7 @@ namespace RemakeDatabase
                 catch (SqlException e)
                 {
                     if (e.Number == 3701)
-                        ReportProcess(string.Format("Banco de dados {0} n„o existe, continuado para processo de criaÁ„o", remakeConfiguration.Database));
+                        DoReportProcess(string.Format("Banco de dados {0} n√£o existe, continuado para processo de cria√ß√£o", config.Database), false);
                     else
                         throw;
                 }
@@ -237,7 +240,7 @@ namespace RemakeDatabase
             {
                 try
                 {
-                    ExecuteAndReportProcess(command, "Removendo conexıes existentes com o banco de dados", "Conexıes removidas");
+                    ExecuteAndReportProcess(command, "Removendo conex√µes existentes com o banco de dados", "Conex√µes removidas");
                 }
                 catch (Exception e)
                 {

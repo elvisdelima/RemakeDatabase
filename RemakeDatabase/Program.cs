@@ -1,5 +1,7 @@
 ﻿using System;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace RemakeDatabase
 {
@@ -7,6 +9,16 @@ namespace RemakeDatabase
     {
         static void Main(string[] args)
         {
+
+            /*var assembly = Assembly.LoadFile(Path.Combine(Environment.CurrentDirectory, @"Microsoft.SqlServer.Management.SqlScriptPublishModel.dll"));
+
+            var typeSqlScriptPublishModel = assembly.GetTypes().FirstOrDefault(t => t.Name.Contains("SqlScriptOptions"));
+
+            foreach (var propertyInfo in typeSqlScriptPublishModel.GetProperties())
+            {
+                Console.WriteLine("{0} => {1}", propertyInfo.Name, propertyInfo.PropertyType.Name);
+            }
+            return;*/
             if (args == null || !args.Any())
             {
                 Console.WriteLine("Digite o nome da base de dados:");
@@ -16,11 +28,10 @@ namespace RemakeDatabase
 
             var remaker = new Remaker(remakeConfiguration);
             remaker.ReportProcess += Console.WriteLine;
-            remaker.ReportScriptCopying += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.ReportScriptExecuting += (complete, maxVal, barSize) => DrawProgressBar(complete, maxVal, barSize, '█');
             remaker.Remake();
         }
-        
+
         private static void DrawProgressBar(int complete, int maxVal, int barSize, char progressCharacter)
         {
             Console.CursorVisible = false;
